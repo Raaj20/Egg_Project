@@ -1,0 +1,242 @@
+# R Code
+
+# Merging Counts
+
+library(dplyr)
+
+count_dir <- "/Users/viraajv/Egg_Project/Analysis/trimmed_reads/maturemiRNAcounts"
+files <- list.files(count_dir, pattern = "*-counts.txt", full.names = TRUE)
+
+count_list <- lapply(files, function(file) {
+  df <- read.table(file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+  sample_name <- sub("_L001_R1_001-counts.txt", "", basename(file))
+  colnames(df)[2] <- sample_name 
+  return(df)
+})
+
+merged_counts <- Reduce(function(x, y) merge(x, y, by = "miRNA", all = TRUE), count_list)
+merged_counts[is.na(merged_counts)] <- 0
+write.csv(merged_counts, file = file.path(count_dir, "merged_miRNA_counts.csv"), row.names = FALSE)
+cat("✅ Merged count matrix saved to 'merged_miRNA_counts.csv'\n")
+
+
+merged_counts_filtered <- merged_counts[rowSums(merged_counts[ , -1]) > 0, ]
+write.csv(
+  merged_counts_filtered,
+  file = file.path(count_dir, "merged_miRNA_counts.filtered.csv"),
+  row.names = FALSE)
+cat("✅ Filtered count matrix saved to 'merged_miRNA_counts.filtered.csv'\n")
+
+
+
+#DESEQ2
+samples <- c(
+  "LE", "LC", "LE", "LC", "LE", "LE", "LC", "LC",
+  "LE", "LE", "LC", "LE", "LC", "LC", "LE", "LC", 
+  "ZC", "ZE", "ZE", "ZE", "ZC", "ZE", "ZC", "ZC",
+  "ZC", "ZE", "ZE", "ZC", "ZE", "ZC", "ZC", "ZE"
+)
+
+#install.packages("BiocManager")
+#BiocManager::install("DESeq2")
+#install.packages("DESeq2")
+
+library(DESeq2)
+
+setwd("/Users/viraajv/Egg_Project/Analysis/trimmed_reads/maturemiRNAcounts")
+count_data_raw <- read.csv("merged_miRNA_counts.filtered.csv", row.names = 1, check.names = FALSE)
+
+# Ensure samples vector is defined and matches columns of count_data_raw
+stopifnot(length(samples) == ncol(count_data_raw))
+
+sample_info <- data.frame(
+  condition = factor(samples, levels = c("LE", "LC", "ZC", "ZE"))
+)
+rownames(sample_info) <- colnames(count_data_raw)
+
+print(head(sample_info))
+table(sample_info$condition)
+
+count_matrix <- as.matrix(count_data_raw)
+
+# Create DESeq2 dataset
+dds <- DESeqDataSetFromMatrix(
+  countData = count_matrix,
+  colData = sample_info,
+  design = ~ condition
+)
+
+# Pre-filter and normalize
+dds <- estimateSizeFactors(dds)
+idx <- rowSums(counts(dds, normalized=TRUE) >= 5) >= 3
+dds <- dds[idx, ]
+
+# Run DESeq analysis
+dds <- DESeq(dds)
+
+
+normalized_counts <- counts(dds, normalized = TRUE)
+
+res_ZE_ZC <- results(dds, contrast = c("condition", "ZE", "ZC"))
+res_LE_ZC  <- results(dds, contrast = c("condition", "LE", "ZC"))
+res_LE_LC <- results(dds, contrast = c("condition", "LE", "LC"))
+res_ZC_LC  <- results(dds, contrast = c("condition", "ZC", "LC"))
+res_ZE_LE <- results(dds, contrast = c("condition", "ZE", "LE"))
+res_ZE_LC  <- results(dds, contrast = c("condition", "ZE", "LC"))
+
+#1
+sigres_ZE_ZC <- res_ZE_ZC[which(res_ZE_ZC$padj < 0.05), ]
+head(sigres_ZE_ZC)
+#2
+sigres_LE_ZC <- res_LE_ZC[which(res_LE_ZC$padj < 0.05), ]
+head(sigres_LE_ZC)
+
+#3
+sigres_LE_LC <- res_LE_LC[which(res_LE_LC$padj < 0.05), ]
+head(sigres_LE_LC)
+#4
+sigres_ZC_LC <- res_ZC_LC[which(res_ZC_LC$padj < 0.05), ]
+head(sigres_ZC_LC)
+
+#5
+sigres_ZE_LE <- res_ZE_LE[which(res_ZE_LE$padj < 0.05), ]
+head(sigres_ZE_LE)
+
+#6
+sigres_ZE_LC<- res_ZE_LC[which(res_ZE_LC$padj < 0.05), ]
+head(sigres_ZE_LC)
+
+
+df <- function(x) {
+     x <- as.data.frame(x)
+     x$ID <- rownames(x)
+     x <- x[, c("ID", setdiff(names(x), "ID"))]
+     x
+  }
+
+
+write.csv(df(res_ZE_ZC), "res_ZE_ZC_all.csv", row.names = FALSE)
+write.csv(df(sigres_ZE_ZC), "res_ZE_ZC_significant.csv", row.names = FALSE)
+
+write.csv(df(res_LE_ZC), "res_LE_ZC_all.csv", row.names = FALSE)
+write.csv(df(sigres_LE_ZC), "res_LE_ZC_significant.csv", row.names = FALSE)
+
+write.csv(df(res_LE_LC), "res_LE_LC_all.csv", row.names = FALSE)
+write.csv(df(sigres_LE_LC), "res_LE_LC_significant.csv", row.names = FALSE)
+
+write.csv(df(res_ZC_LC), "res_ZC_LC_all.csv", row.names = FALSE)
+write.csv(df(sigres_ZC_LC), "res_ZC_LC_significant.csv", row.names = FALSE)
+
+write.csv(df(res_ZE_LE), "res_ZE_LE_all.csv", row.names = FALSE)
+write.csv(df(sigres_ZE_LE), "res_ZE_LE_significant.csv", row.names = FALSE)
+
+write.csv(df(res_ZE_LC), "res_ZE_LC_all.csv", row.names = FALSE)
+write.csv(df(sigres_ZE_LC), "res_ZE_LC_significant.csv", row.names = FALSE)
+
+
+# PCAPlot
+library(DESeq2)
+library(ggplot2)
+
+# Assuming 'dds' is your DESeqDataSet object already processed with DESeq()
+
+# Perform variance stabilizing transformation (or rlog)
+vst <- varianceStabilizingTransformation(dds, blind=FALSE)
+
+# Extract PCA data with grouping info
+pcaData <- plotPCA(vst, intgroup="condition", returnData=TRUE)
+
+# Percentage of variance explained by PCs
+percentVar <- round(100 * attr(pcaData, "percentVar"), 1)
+
+# Optional: define custom colors for your conditions
+custom_colors <- c(
+  "LC" = "green",
+  "LE" = "yellow",
+  "ZC" = "purple",
+  "ZE" = "orange"
+)
+
+# Create PCA plot
+ggplot(pcaData, aes(x=PC1, y=PC2, color=condition)) +
+  geom_point(size=3) +
+  scale_color_manual(values=custom_colors) +
+  labs(
+    title = "PCA Plot of miRNA Counts",
+    x = paste0("PC1: ", percentVar[1], "% variance"),
+    y = paste0("PC2: ", percentVar[2], "% variance")
+  ) +
+  theme_minimal()
+
+
+# Faceted Plot
+vsd <- varianceStabilizingTransformation(dds, blind = FALSE)
+
+# 2. Extract PCA data
+pca_data <- plotPCA(vsd, intgroup = "condition", returnData = TRUE)
+
+# 3. Subset and label comparisons (experimental group first)
+ze_zc   <- pca_data %>% filter(condition %in% c("ZE", "ZC")) %>% mutate(Facet = "ZE vs ZC")
+le_lc   <- pca_data %>% filter(condition %in% c("LE", "LC")) %>% mutate(Facet = "LE vs LC")
+
+# 4. Split subsets
+subset_zdf  <- bind_rows(ze_zc)
+subset_lean <- bind_rows(le_lc)
+
+# 5. Custom color scheme
+custom_colors <- c(
+  "ZC" = "purple", "ZW" = "orange",
+  "LC" = "green", "LE" = "yellow"
+)
+
+# 6. Percent variance
+percentVar <- round(100 * attr(pca_data, "percentVar"))
+
+# 7. ZDF Plot
+p_zdf <- ggplot(subset_zdf, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 5) +
+  facet_wrap(~Facet, scales = "fixed", nrow = 1) +
+  scale_color_manual(values = custom_colors) +
+  labs(
+    title = "ZDF PCA: EV miRNA Expression",
+    x = paste0("PC1: ", percentVar[1], "% variance"),
+    y = paste0("PC2: ", percentVar[2], "% variance")
+  ) +
+  theme_minimal() +
+  coord_fixed() +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    legend.position = "bottom"
+  )
+
+# 8. LEAN Plot
+p_lean <- ggplot(subset_lean, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 5) +
+  facet_wrap(~Facet, scales = "fixed", nrow = 1) +  # keep side-by-side
+  scale_color_manual(values = custom_colors) +
+  labs(
+    title = "LEAN PCA: EV miRNA Expression",
+    x = paste0("PC1: ", percentVar[1], "% variance"),
+    y = paste0("PC2: ", percentVar[2], "% variance")
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    legend.position = "bottom",
+    panel.spacing = unit(1, "lines"),
+    aspect.ratio = 1  )
+
+
+# 9. Display
+print(p_zdf)
+print(p_lean)
+
+
+# 10. Save (optional)
+ggsave("ZDF_PCA_plot.png", p_zdf, path = "/Users/viraajv/Egg_Project/Analysis/trimmed_reads/maturemiRNAcounts", width = 10, height = 4, dpi = 300)
+ggsave("LEAN_PCA_plot.png", p_lean, path = "/Users/viraajv/Egg_Project/Analysis/trimmed_reads/maturemiRNAcounts", width = 8, height = 4, dpi = 300)
+
+
+
+
+
