@@ -134,6 +134,7 @@ write.csv(df(res_ZE_LC), "res_ZE_LC_all.csv", row.names = FALSE)
 write.csv(df(sigres_ZE_LC), "res_ZE_LC_significant.csv", row.names = FALSE)
 
 
+
 # PCAPlot
 library(DESeq2)
 library(ggplot2)
@@ -307,4 +308,66 @@ ggsave("volcano_LE_LC.png", plot = p3, width = 6, height = 6, dpi = 300)
 ggsave("volcano_ZE_LC.png",  plot = p4, width = 6, height = 6, dpi = 300)
 ggsave("volcano_ZC_LC.png", plot = p5, width = 6, height = 6, dpi = 300)
 ggsave("volcano_ZE_LE.png",  plot = p6, width = 6, height = 6, dpi = 300)
+
+
+# Heatmap
+library(pheatmap)
+library(RColorBrewer)
+library(dplyr)
+
+# --- vst-normalized expression matrix ---
+vsh <- varianceStabilizingTransformation(dds, blind = FALSE)
+vst_counts <- assay(vsh)
+
+res_ZE_ZC
+res_LE_ZC
+res_LE_LC
+res_ZC_LC
+res_ZE_LE
+res_ZE_LC
+sig_le  <- rownames(res_LE_LC)[res_LE_LC$padj < 0.05]
+
+# --- Get significant miRNAs from both comparisons ---
+sig_ze <- rownames(res_ZE_ZC)[res_ZE_ZC$padj < 0.05]
+
+
+# --- Combine and clean list ---
+sig_all_zdf <- union(sig_ze)
+sig_all_zdf <- intersect(sig_all_zdf, rownames(vsh_counts))  # Ensure present in counts
+
+# --- Filter vst matrix for ZDF samples and sig miRNAs ---
+zdf_samples <- rownames(sample_info)[sample_info$condition %in% c("ZC", "ZE")]
+zdf_samples_filtered <- zdf_samples[zdf_samples %in% colnames(vsh_counts)]
+zdf_matrix <- vsh_counts[sig_all_zdf, zdf_samples_filtered]
+
+# --- Order samples by condition ---
+sample_info$condition <- factor(sample_info$condition, levels = c("ZC", "ZE"))
+zdf_samples_ordered <- zdf_samples_filtered[order(sample_info[zdf_samples_filtered, "condition"])]
+zdf_matrix <- zdf_matrix[, zdf_samples_ordered]
+
+# --- Prepare annotation ---
+zdf_annotation <- data.frame(Group = sample_info[zdf_samples_ordered, "condition"])
+rownames(zdf_annotation) <- zdf_samples_ordered
+
+group_colors <- list(
+  Group = c("ZC" = "purple", "ZE" = "orange")
+)
+
+
+
+# --- Plot heatmap ---
+h1 <- pheatmap(zdf_matrix,
+         annotation_col = zdf_annotation,
+         annotation_colors = group_colors,
+         scale = "row",
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         show_rownames = TRUE,
+         labels_col = NA,
+         fontsize_col = 10,
+         fontsize_row = 8,
+         main = "ZDF miRNA Expression – DE miRNAs",
+         color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(100))
+
+ggsave("heatmap_ZDF.png", plot = h1, width = 6, height = 6, dpi = 300)
 
