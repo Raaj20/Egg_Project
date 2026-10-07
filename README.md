@@ -123,12 +123,16 @@ COUNTDIR="$OUTPUTDIR/maturemiRNAcounts"
 mkdir -p "$COUNTDIR"
 
 # --- Loop through all trimmed FASTQ files ---
+OUTPUTDIR="/Users/viraajv/Egg_Project/Analysis/trimmed_reads"
+INDEX="/Users/viraajv/Egg_Project/Index/mature_rnoTs"
+COUNTDIR="$OUTPUTDIR/maturemiRNAcountsupdated"
+mkdir -p "$COUNTDIR"
+
 for file in "$OUTPUTDIR"/*-Trimmed.fastq; do
     i=$(basename "$file" -Trimmed.fastq)
-
     echo "Running Bowtie on $i..."
 
-    bowtie -v 1 -k 1 -m 1 --best --strata --threads 16 -S\
+    bowtie -n 0 -l 32 --norc --best --strata -m 1 --threads 16 \
         "$INDEX" \
         -q "$file" \
         --un "$OUTPUTDIR/${i}-unaligned.fastq" \
@@ -136,7 +140,6 @@ for file in "$OUTPUTDIR"/*-Trimmed.fastq; do
         2> "$OUTPUTDIR/${i}.log"
 
     echo "Converting SAM to BAM and indexing..."
-
     samtools sort "$OUTPUTDIR/${i}.sam" -o "$OUTPUTDIR/${i}.bam"
     samtools index "$OUTPUTDIR/${i}.bam"
     rm "$OUTPUTDIR/${i}.sam"
@@ -145,10 +148,29 @@ for file in "$OUTPUTDIR"/*-Trimmed.fastq; do
 
     samtools idxstats "$OUTPUTDIR/${i}.bam" | cut -f1,3 | \
         sed "1s/^/miRNA\t${i}-miRNAcount\n/" > "$COUNTDIR/${i}-counts.txt"
-
     echo "Done with $i."
 done
 
+
+
+
+library(dplyr)
+
+count_dir <- "/Users/viraajv/Egg_Project/Analysis/trimmed_reads/maturemiRNAcountsupdated"
+files <- list.files(count_dir, pattern = "*-counts.txt", full.names = TRUE)
+
+count_list <- lapply(files, function(file) {
+  df <- read.table(file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+  sample_name <- sub("-counts.txt", "", basename(file))
+  colnames(df)[2] <- sample_name
+  return(df)
+})
+
+merged_counts <- Reduce(function(x, y) merge(x, y, by = "miRNA", all = TRUE), count_list)
+merged_counts[is.na(merged_counts)] <- 0
+
+write.csv(merged_counts, file = file.path(count_dir, "merged_miRNA_counts.csv"), row.names = FALSE)
+cat("✅ Merged count matrix saved to 'merged_miRNA_counts.csv'\n")
 
 ## Post-trimmed QC
 for file in "$OUTPUTDIR"/*Trimmed.fastq; do   
